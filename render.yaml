@@ -1,0 +1,69 @@
+# Render blueprint for the ORDER backend (API + job worker + scheduler).
+# Database lives on Supabase; the frontend lives on Vercel.
+#
+# First deploy: connect this repo as a Blueprint in the Render dashboard, then fill
+# in the secret env vars (marked sync:false) in the "order-backend" env group.
+#
+# IMPORTANT role split:
+#   DATABASE_URL          -> the RLS-enforced app role (order_app) session-pooler string
+#   MIGRATE_DATABASE_URL  -> the OWNER/superuser string (only used to run migrations)
+services:
+  - type: web
+    name: order-api
+    runtime: python
+    rootDir: backend
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    # preDeployCommand requires a paid instance. It runs migrations with the OWNER
+    # connection before each deploy. On the free tier, run migrations manually instead
+    # (see the deploy guide) and delete this line.
+    preDeployCommand: "DATABASE_URL=$MIGRATE_DATABASE_URL python scripts/migrate.py"
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - fromGroup: order-backend
+
+  - type: worker
+    name: order-worker
+    runtime: python
+    rootDir: backend
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/worker.py
+    envVars:
+      - fromGroup: order-backend
+
+  - type: cron
+    name: order-scheduler
+    runtime: python
+    rootDir: backend
+    plan: starter
+    schedule: "0 * * * *"   # hourly: enqueues analytics/missions/experiments jobs per tenant
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/schedule_jobs.py
+    envVars:
+      - fromGroup: order-backend
+
+envVarGroups:
+  - name: order-backend
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: APP_ENV
+        value: production
+      - key: TRUST_FORWARDED_HOST
+        value: "true"
+      - key: AUTH_RATE_LIMIT_PER_MINUTE
+        value: "10"
+      - key: DATABASE_URL          # order_app role, Supabase SESSION-mode pooler
+        sync: false
+      - key: MIGRATE_DATABASE_URL  # owner/superuser, only for migrations
+        sync: false
+      - key: JWT_SECRET            # 32+ random bytes
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN       # comma-separated Vercel + custom domains
+        sync: false
+      - key: PLATFORM_DOMAIN_TARGET  # e.g. cname.vercel-dns.com
+        sync: false
