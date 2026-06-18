@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@mapbox/search-js-react": "^1.5.1"
+  }
+}
